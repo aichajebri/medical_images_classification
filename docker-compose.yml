@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: brain-tumor-postgres
+    environment:
+      POSTGRES_DB: brain_tumor_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d brain_tumor_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - brain-tumor-network
+
+  mongo:
+    image: mongo:latest
+    container_name: brain-tumor-mongo
+    environment:
+      MONGO_INITDB_DATABASE: brain_tumor_metadata
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping').ok", "--quiet"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+    networks:
+      - brain-tumor-network
+
+  backend:
+    image: brain-tumor-api:latest
+    container_name: brain-tumor-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/brain_tumor_db
+      MODEL_PATH: /app/outputs/step4_training/model_checkpoint.pth
+      STORAGE_PATH: /app/backend/storage
+    volumes:
+      - ./backend/storage/images:/app/backend/storage/images
+      - ./backend/storage/heatmaps:/app/backend/storage/heatmaps
+      - ./backend/storage/reports:/app/backend/storage/reports
+    networks:
+      - brain-tumor-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8000)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+volumes:
+  postgres_data:
+    driver: local
+  mongo_data:
+    driver: local
+
+networks:
+  brain-tumor-network:
+    driver: bridge
+
